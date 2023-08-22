@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"sync/atomic"
 	"time"
 )
 
@@ -41,4 +43,33 @@ func (r *recorder) download(ctx context.Context, url string, size int) error {
 	// start recording
 
 	return nil
+}
+
+type measureProxy struct {
+	io.Reader
+	*recorder
+}
+
+func (r *recorder) newMeasureProxy(ctx context.Context, reader io.Reader) io.Reader {
+	rp := &measureProxy{
+		Reader:   reader,
+		recorder: r,
+	}
+	go rp.Watch(ctx, r.lapch)
+	return rp
+}
+
+func (m *measureProxy) Watch(ctx context.Context, send chan<- Lap) {
+	t := time.NewTicker(150 * time.Millisecond)
+	defer t.Stop()
+	for {
+		select {
+		case <-t.C:
+			byteLen := atomic.LoadInt64(&m.byteLen)
+			delta := time.Now().Sub(m.start).Seconds()
+			send <- newLap(byteLen, delta)
+		case <-ctx.Done():
+			return
+		}
+	}
 }
