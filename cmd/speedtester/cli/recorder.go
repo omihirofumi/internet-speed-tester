@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"sync/atomic"
 	"time"
@@ -41,7 +42,33 @@ func (r *recorder) download(ctx context.Context, url string, size int) error {
 	}
 
 	// start recording
+	proxy := r.newMeasureProxy(ctx, resp.Body)
 
+	if _, err := io.Copy(io.Discard, proxy); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (r *recorder) upload(ctx context.Context, url string, size int) error {
+	// start measure
+	proxy := r.newMeasureProxy(ctx, rand.New(rand.NewSource(0)))
+	req, err := http.NewRequest("POST", url, proxy)
+	if err != nil {
+		return err
+	}
+	req.ContentLength = int64(size)
+	req.Header.Set("Content-Type", "application/octet-stream")
+	req = req.WithContext(ctx)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return errors.New(resp.Status)
+	}
 	return nil
 }
 
